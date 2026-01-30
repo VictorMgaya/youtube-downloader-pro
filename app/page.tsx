@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import Head from 'next/head'
 import Link from 'next/link'
 import { Search, Download, Youtube, Video, Music, Loader2, AlertCircle } from 'lucide-react'
 
@@ -121,12 +120,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      <Head>
-        <title>YouTube Downloader Pro</title>
-        <meta name="description" content="Download YouTube videos and audio in all formats and qualities" />
-        <meta name="keywords" content="YouTube, downloader, video, audio, MP4, MP3, HD, 4K" />
-      </Head>
-
       {/* Navigation */}
       <nav className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
