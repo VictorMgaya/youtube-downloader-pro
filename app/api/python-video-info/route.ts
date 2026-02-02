@@ -79,7 +79,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       const pythonCommand = isVercel ? 'python3' : 'python'
       
       // Ensure URL is properly quoted for shell execution
-      const quotedUrl = `"${url.replace(/"/g, '\\"')}"`
+      const quotedUrl = `"${url.replace(/"/g, '\\"').replace(/ /g, '\\ ')}"`
       const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`, {
         env: {
           ...process.env,
