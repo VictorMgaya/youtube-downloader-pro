@@ -61,7 +61,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       `https://www.youtube.com/watch?v=${videoId}`,
       format,
       outputPath
-    ])
+    ], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONPATH: process.cwd(),
+        PATH: process.env.PATH
+      }
+    })
 
     let stdout = ''
     let stderr = ''

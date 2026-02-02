@@ -80,7 +80,13 @@ export async function POST(request: NextRequest): Promise<Response> {
       
       // Ensure URL is properly quoted for shell execution
       const quotedUrl = `"${url.replace(/"/g, '\\"')}"`
-      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`)
+      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`, {
+        env: {
+          ...process.env,
+          PYTHONPATH: process.cwd(),
+          PATH: process.env.PATH
+        }
+      })
       
       if (stderr) {
         console.warn('Python script stderr:', stderr)
