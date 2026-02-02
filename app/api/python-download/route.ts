@@ -43,8 +43,11 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
 
     // Check Python availability
+    const isVercel = process.env.VERCEL === '1'
+    const pythonCommand = isVercel ? 'python3' : 'python'
+    
     try {
-      await exec('python --version')
+      await exec(`${pythonCommand} --version`)
     } catch (pythonError) {
       return NextResponse.json(
         { error: 'Python is not available on this system' },
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
 
     // Execute Python script with enhanced error handling
-    const pythonProcess = spawn('python', [
+    const pythonProcess = spawn(pythonCommand, [
       pythonScriptPath,
       `https://www.youtube.com/watch?v=${videoId}`,
       format,

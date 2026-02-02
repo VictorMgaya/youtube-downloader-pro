@@ -72,8 +72,12 @@ export async function POST(request: NextRequest): Promise<Response> {
     const pythonScriptPath = join(process.cwd(), 'scripts', 'get_video_info.py')
     
     try {
-      // Execute Python script
-      const { stdout, stderr } = await exec(`python ${pythonScriptPath} "${url}"`)
+      // Check if we're on Vercel serverless environment
+      const isVercel = process.env.VERCEL === '1'
+      
+      // Execute Python script with proper path handling
+      const pythonCommand = isVercel ? 'python3' : 'python'
+      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" "${url}"`)
       
       if (stderr) {
         console.warn('Python script stderr:', stderr)
