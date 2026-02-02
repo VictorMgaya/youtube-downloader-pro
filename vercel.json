@@ -4,5 +4,13 @@
       "PYTHON_VERSION": "3.10"
     }
   },
-  "regions": ["iad1"]
+  "regions": ["iad1"],
+  "functions": {
+    "app/api/python-download/route.ts": {
+      "runtime": "nodejs18.x"
+    },
+    "app/api/python-video-info/route.ts": {
+      "runtime": "nodejs18.x"
+    }
+  }
 }
