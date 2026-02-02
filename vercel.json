@@ -1,12 +1,4 @@
 {
-  "functions": {
-    "app/api/python-video-info/route.ts": {
-      "runtime": "edge"
-    },
-    "app/api/python-download/route.ts": {
-      "runtime": "edge"
-    }
-  },
   "build": {
     "env": {
       "PYTHON_VERSION": "3.10"
