@@ -77,7 +77,10 @@ export async function POST(request: NextRequest): Promise<Response> {
       
       // Execute Python script with proper path handling
       const pythonCommand = isVercel ? 'python3' : 'python'
-      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" "${url}"`)
+      
+      // Ensure URL is properly quoted for shell execution
+      const quotedUrl = `"${url.replace(/"/g, '\\"')}"`
+      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`)
       
       if (stderr) {
         console.warn('Python script stderr:', stderr)
