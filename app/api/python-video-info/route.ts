@@ -72,66 +72,107 @@ export async function POST(request: NextRequest): Promise<Response> {
     const pythonScriptPath = join(process.cwd(), 'scripts', 'get_video_info.py')
     
     try {
-      // Check if we're on Vercel serverless environment
+      // Check if we're on Vercel serverless environment or other server environments
       const isVercel = process.env.VERCEL === '1'
+      const isServerEnvironment = isVercel || process.env.NODE_ENV === 'production'
       
       // Execute Python script with proper path handling
-      const pythonCommand = isVercel ? 'python3' : 'python'
+      const pythonCommand = isServerEnvironment ? 'python3' : 'python'
       
       // Ensure URL is properly quoted for shell execution
       const quotedUrl = `"${url.replace(/"/g, '\\"').replace(/ /g, '\\ ')}"`
-      const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`, {
-        env: {
-          ...process.env,
-          PYTHONPATH: process.cwd(),
-          PATH: process.env.PATH
-        }
-      })
       
-      if (stderr) {
-        console.warn('Python script stderr:', stderr)
+      // Execute with timeout to prevent hanging processes
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      
+      try {
+        const { stdout, stderr } = await exec(`${pythonCommand} "${pythonScriptPath}" ${quotedUrl}`, {
+          env: {
+            ...process.env,
+            PYTHONPATH: process.cwd(),
+            PATH: process.env.PATH
+          },
+          signal: controller.signal,
+          timeout: 30000  // 30 second timeout
+        })
+        
+        clearTimeout(timeoutId)
+        
+        if (stderr) {
+          console.warn('Python script stderr:', stderr)
+        }
+
+        // Parse Python script output
+        let result: VideoInfoResult
+        try {
+          // Handle case where output might contain extra logging
+          const cleanedOutput = stdout.trim().split('\n').pop() || '{}'
+          result = JSON.parse(cleanedOutput)
+        } catch (parseError) {
+          console.error('Failed to parse Python output:', parseError)
+          console.error('Raw output:', stdout)
+          return NextResponse.json(
+            { 
+              success: false,
+              error: 'Failed to parse video information',
+              method: 'Python extraction'
+            },
+            { status: 500 }
+          )
+        }
+
+        if (result.success && result.videoInfo && result.formats) {
+          return NextResponse.json({
+            success: true,
+            videoInfo: result.videoInfo,
+            formats: result.formats,
+            method: result.method || 'Python extraction'
+          })
+        } else {
+          return NextResponse.json(
+            { 
+              success: false,
+              error: result.error || 'Failed to extract video information',
+              method: result.method || 'Python extraction'
+            },
+            { status: 500 }
+          )
+        }
+
+      } catch (timeoutError) {
+        if (controller.signal.aborted) {
+          console.error('Python script execution timed out')
+          return NextResponse.json(
+            { 
+              success: false,
+              error: 'Python script execution timed out',
+              method: 'Python extraction'
+            },
+            { status: 408 }
+          )
+        }
+        throw timeoutError
       }
 
-      // Parse Python script output
-      let result: VideoInfoResult
-      try {
-        result = JSON.parse(stdout)
-      } catch (parseError) {
-        console.error('Failed to parse Python output:', parseError)
+    } catch (pythonError: any) {
+      console.error('Python script execution failed:', pythonError)
+      
+      if (pythonError.code === 'ENOENT') {
         return NextResponse.json(
           { 
             success: false,
-            error: 'Failed to parse video information',
+            error: 'Python is not installed or not found in PATH',
             method: 'Python extraction'
           },
           { status: 500 }
         )
       }
-
-      if (result.success && result.videoInfo && result.formats) {
-        return NextResponse.json({
-          success: true,
-          videoInfo: result.videoInfo,
-          formats: result.formats,
-          method: result.method || 'Python extraction'
-        })
-      } else {
-        return NextResponse.json(
-          { 
-            success: false,
-            error: result.error || 'Failed to extract video information',
-            method: result.method || 'Python extraction'
-          },
-          { status: 500 }
-        )
-      }
-
-    } catch (pythonError) {
-      console.error('Python script execution failed:', pythonError)
+      
       return NextResponse.json(
         { 
           success: false,
-          error: 'Python script execution failed',
+          error: 'Python script execution failed: ' + pythonError.message,
           method: 'Python extraction'
         },
         { status: 500 }

@@ -42,12 +42,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       )
     }
 
-    // Check Python availability
+    // Check if we're on Vercel serverless environment or other server environments
     const isVercel = process.env.VERCEL === '1'
-    const pythonCommand = isVercel ? 'python3' : 'python'
+    const isServerEnvironment = isVercel || process.env.NODE_ENV === 'production'
+    const pythonCommand = isServerEnvironment ? 'python3' : 'python'
     
     try {
-      await exec(`${pythonCommand} --version`)
+      // Check if Python is available
+      await exec(`${pythonCommand} --version`, { timeout: 5000 })
     } catch (pythonError) {
       return NextResponse.json(
         { error: 'Python is not available on this system' },
@@ -95,7 +97,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             pythonOutput: stdout,
             pythonError: stderr
           },
-          { status: 504 }
+          { status: 408 }
         ))
       }, 10 * 60 * 1000) // 10 minutes
 

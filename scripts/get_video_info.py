@@ -17,7 +17,7 @@ import time
 import random
 
 def install_required_packages():
-    """Install required Python packages"""
+    """Install required Python packages with error handling for server environments"""
     packages = ['requests', 'beautifulsoup4', 'lxml']
     for package in packages:
         try:
@@ -25,9 +25,15 @@ def install_required_packages():
         except ImportError:
             print(f"Installing {package}...")
             try:
-                subprocess.check_call([sys.executable, '-m', 'pip', 'install', package])
-            except Exception as e:
+                # Use the pip module to install packages
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", package, "--user", "--timeout=60"
+                ])
+            except subprocess.CalledProcessError as e:
                 print(f"Failed to install {package}: {e}")
+                return False
+            except Exception as e:
+                print(f"Unexpected error installing {package}: {e}")
                 return False
     return True
 
@@ -363,12 +369,20 @@ def create_fallback_formats(duration):
 def get_video_info_with_yt_dlp(url):
     """Extract video info using yt-dlp if available"""
     try:
-        # Try to install yt-dlp
+        # Try to install yt-dlp if not available
         try:
             import yt_dlp
         except ImportError:
             print("Installing yt-dlp...")
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'yt-dlp'])
+            # Install with timeout to prevent hanging in server environments
+            result = subprocess.run([
+                sys.executable, "-m", "pip", "install", "yt-dlp", "--user", "--timeout=60"
+            ], timeout=120)  # 2-minute timeout for installation
+            
+            if result.returncode != 0:
+                print("Failed to install yt-dlp")
+                return None, None
+                
             import yt_dlp
         
         ydl_opts = {
@@ -384,6 +398,9 @@ def get_video_info_with_yt_dlp(url):
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
             },
+            # Add timeouts to prevent hanging
+            'socket_timeout': 30,
+            'http_chunk_size': 10485760,  # 10MB
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -403,6 +420,10 @@ def get_video_info_with_yt_dlp(url):
                 
                 formats = []
                 for format_data in info.get('formats', []):
+                    # Skip formats that don't have a URL (may be unavailable)
+                    if not format_data.get('url'):
+                        continue
+                        
                     formats.append({
                         'itag': format_data.get('format_id', 0),
                         'quality': format_data.get('quality', 'unknown'),
@@ -420,6 +441,8 @@ def get_video_info_with_yt_dlp(url):
                 
                 return video_info, formats
     
+    except subprocess.TimeoutExpired:
+        print("yt-dlp installation timed out")
     except Exception as e:
         print(f"yt-dlp extraction failed: {e}")
     
@@ -448,6 +471,8 @@ def get_video_info_with_requests(url):
             video_info['videoId'] = video_id
             return video_info, formats
     
+    except requests.exceptions.Timeout:
+        print("Request timed out")
     except Exception as e:
         print(f"Requests extraction failed: {e}")
     

@@ -13,16 +13,27 @@ import tempfile
 from urllib.parse import urlparse, parse_qs
 
 def install_yt_dlp():
-    """Install yt-dlp if not already installed"""
+    """Install yt-dlp if not already installed with timeout for server environments"""
     try:
         import yt_dlp
         return True
     except ImportError:
         print("Installing yt-dlp...")
         try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'yt-dlp', '--upgrade'])
+            # Install with timeout to prevent hanging in server environments
+            result = subprocess.run([
+                sys.executable, "-m", "pip", "install", "yt-dlp", "--user", "--timeout=60"
+            ], timeout=120)  # 2-minute timeout for installation
+            
+            if result.returncode != 0:
+                print(f"Failed to install yt-dlp with return code: {result.returncode}")
+                return False
+                
             import yt_dlp
             return True
+        except subprocess.TimeoutExpired:
+            print("Installation of yt-dlp timed out")
+            return False
         except Exception as e:
             print(f"Failed to install yt-dlp: {e}")
             return False
@@ -141,8 +152,12 @@ def download_video(url, format_code, output_path):
             'retries': 10,  # Increased retries for reliability
             'fragment_retries': 20,  # More retries for fragments
             'skip_unavailable_fragments': False,
-            'concurrent_fragment_downloads': 5,  # Parallel fragment downloads
+            'concurrent_fragment_downloads': 3,  # Lower concurrent downloads for server stability
             'throttledratelimit': 100000,  # Limit download speed to avoid throttling
+            
+            # Timeout settings to prevent hanging
+            'socket_timeout': 30,
+            'timeout': 300,  # 5 minute overall timeout
             
             # User agent and headers for bypassing restrictions
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -170,6 +185,7 @@ def download_video(url, format_code, output_path):
             # Download speed optimizations
             'http_chunk_size': 10485760,  # 10MB chunks
             'buffer_size': 1024,
+            'sleep_interval_requests': 1,  # Sleep between requests
             'sleep_interval': 1,  # Short sleep between requests
             'max_sleep_interval': 5,
             
@@ -188,53 +204,59 @@ def download_video(url, format_code, output_path):
         }
         
         # Add post-processors for audio-only formats to ensure proper encoding
-        # Check for FFmpeg availability with multiple methods
-        ffmpeg_available = False
-        try:
-            import subprocess
-            # Try different ways to check for FFmpeg
-            for cmd in ['ffmpeg', 'ffmpeg.exe', 'C:\\ffmpeg\\bin\\ffmpeg.exe']:
-                try:
-                    result = subprocess.run([cmd, '-version'], capture_output=True, check=True, timeout=5)
-                    if result.returncode == 0:
-                        ffmpeg_available = True
-                        print(f"FFmpeg found at: {cmd}")
-                        break
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    continue
-        except Exception:
-            pass
-        
-        if not ffmpeg_available:
-            print("WARNING: FFmpeg not available, skipping all post-processing")
-        
-        # Only add post-processors if FFmpeg is available
-        if ffmpeg_available:
-            if is_audio_only:
-                ydl_opts['postprocessors'] = [
-                    {
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'm4a',
-                        'preferredquality': '0',  # Best quality
-                    },
-                    {
-                        'key': 'FFmpegMetadata',
-                    }
-                ]
-            else:
-                # For video formats, ensure proper merging
-                ydl_opts['postprocessors'] = [
-                    {
-                        'key': 'FFmpegVideoConvertor',
-                        'preferedformat': 'mp4',
-                    },
-                    {
-                        'key': 'FFmpegMetadata',
-                    }
-                ]
+def check_ffmpeg_availability():
+    """Check if FFmpeg is available in the environment"""
+    try:
+        # Try different ways to check for FFmpeg
+        for cmd in ['ffmpeg', 'ffmpeg.exe']:
+            try:
+                result = subprocess.run([cmd, '-version'], 
+                                      capture_output=True, 
+                                      check=True, 
+                                      timeout=10)
+                if result.returncode == 0:
+                    print(f"FFmpeg found at: {cmd}")
+                    return True
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+    except Exception as e:
+        print(f"Error checking FFmpeg: {e}")
+    
+    print("WARNING: FFmpeg not available, skipping all post-processing")
+    return False
+
+    # ... (this function is inserted at the top level, after the install_yt_dlp function)
+    
+    # Check for FFmpeg availability
+    ffmpeg_available = check_ffmpeg_availability()
+    
+    # Add post-processors based on FFmpeg availability
+    if ffmpeg_available:
+        if is_audio_only:
+            ydl_opts['postprocessors'] = [
+                {
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '0',  # Best quality
+                },
+                {
+                    'key': 'FFmpegMetadata',
+                }
+            ]
         else:
-            # No post-processors when FFmpeg is not available
-            ydl_opts['postprocessors'] = []
+            # For video formats, ensure proper merging
+            ydl_opts['postprocessors'] = [
+                {
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                },
+                {
+                    'key': 'FFmpegMetadata',
+                }
+            ]
+    else:
+        # No post-processors when FFmpeg is not available
+        ydl_opts['postprocessors'] = []
         
         # Add format-specific optimizations
         if format_code in ['313', '303', '266', '264']:  # 4K and 1440p
