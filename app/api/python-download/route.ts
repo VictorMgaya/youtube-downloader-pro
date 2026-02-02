@@ -66,7 +66,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       env: {
         ...process.env,
         PYTHONPATH: process.cwd(),
-        PATH: process.env.PATH
+        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+        PYTHONUNBUFFERED: '1'
       }
     })
 
