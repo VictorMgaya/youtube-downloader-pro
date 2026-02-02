@@ -503,25 +503,41 @@ def main():
     # Install required packages
     if not install_required_packages():
         print("ERROR: Could not install required packages")
-        sys.exit(1)
-    
-    # Get video info
-    video_info, formats = get_video_info_comprehensive(url)
-    
-    if video_info and formats:
-        result = {
-            'success': True,
-            'videoInfo': video_info,
-            'formats': formats,
-            'method': 'Python extraction'
-        }
-        
-        print(json.dumps(result, indent=2))
-        sys.exit(0)
-    else:
         result = {
             'success': False,
-            'error': 'Failed to extract video information',
+            'error': 'Failed to install required packages',
+            'method': 'Python extraction'
+        }
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+    
+    try:
+        # Get video info
+        video_info, formats = get_video_info_comprehensive(url)
+        
+        if video_info and formats:
+            result = {
+                'success': True,
+                'videoInfo': video_info,
+                'formats': formats,
+                'method': 'Python extraction'
+            }
+            
+            print(json.dumps(result, indent=2))
+            sys.exit(0)
+        else:
+            result = {
+                'success': False,
+                'error': 'Failed to extract video information',
+                'method': 'Python extraction'
+            }
+            
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
+    except Exception as e:
+        result = {
+            'success': False,
+            'error': f'Python script error: {str(e)}',
             'method': 'Python extraction'
         }
         
