@@ -19,6 +19,31 @@ export async function GET(request: NextRequest): Promise<Response> {
     )
   }
 
+  // Check if we're on Vercel serverless environment
+  const isVercel = process.env.VERCEL === '1'
+  
+  // On Vercel, Python might not be available or properly configured
+  // So we'll return a helpful error message
+  if (isVercel) {
+    return NextResponse.json(
+      { 
+        error: 'Python execution is not supported in this deployment environment. Please use the primary download API instead (/api/download).',
+      },
+      { status: 501 } // Not Implemented
+    )
+  }
+
+  // Check if Python is available in the environment
+  const pythonCommand = 'python3'
+  try {
+    await exec(`${pythonCommand} --version`)
+  } catch (pythonError) {
+    return NextResponse.json(
+      { error: 'Python is not available on this system' },
+      { status: 500 }
+    )
+  }
+
   try {
     // Create downloads directory
     const downloadsDir = path.join(process.cwd(), 'downloads')
@@ -38,21 +63,6 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (!fs.existsSync(pythonScriptPath)) {
       return NextResponse.json(
         { error: 'Python download script not found' },
-        { status: 500 }
-      )
-    }
-
-    // Check if we're on Vercel serverless environment or other server environments
-    const isVercel = process.env.VERCEL === '1'
-    const isServerEnvironment = isVercel || process.env.NODE_ENV === 'production'
-    const pythonCommand = isServerEnvironment ? 'python3' : 'python'
-    
-    try {
-      // Check if Python is available
-      await exec(`${pythonCommand} --version`, { timeout: 5000 })
-    } catch (pythonError) {
-      return NextResponse.json(
-        { error: 'Python is not available on this system' },
         { status: 500 }
       )
     }

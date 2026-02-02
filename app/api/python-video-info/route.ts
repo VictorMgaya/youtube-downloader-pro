@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import { join } from 'path'
 import { promisify } from 'util'
+import fs from 'fs'
 
 const exec = promisify(require('child_process').exec)
 
@@ -68,16 +69,52 @@ export async function POST(request: NextRequest): Promise<Response> {
       )
     }
 
-    // Run Python script to get video info
-    const pythonScriptPath = join(process.cwd(), 'scripts', 'get_video_info.py')
+    // Check if we're on Vercel serverless environment
+    const isVercel = process.env.VERCEL === '1'
     
+    // On Vercel, Python might not be available or properly configured
+    // So we'll return a helpful error message
+    if (isVercel) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Python execution is not supported in this deployment environment. Please use the primary video info API instead (/api/video-info).',
+          method: 'Python extraction'
+        },
+        { status: 501 } // Not Implemented
+      )
+    }
+
+    // Check if Python is available in the environment
     try {
-      // Check if we're on Vercel serverless environment or other server environments
-      const isVercel = process.env.VERCEL === '1'
-      const isServerEnvironment = isVercel || process.env.NODE_ENV === 'production'
-      
+      await exec('python3 --version')
+    } catch (pythonError) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Python is not available in this environment. The python-video-info endpoint requires Python to be installed.',
+          method: 'Python extraction'
+        },
+        { status: 500 }
+      )
+    }
+
+    // Check if the Python script exists
+    const pythonScriptPath = join(process.cwd(), 'scripts', 'get_video_info.py')
+    if (!fs.existsSync(pythonScriptPath)) {
+      return NextResponse.json(
+        { 
+          success: false,
+          error: 'Python script not found. The python-video-info endpoint requires get_video_info.py to be present.',
+          method: 'Python extraction'
+        },
+        { status: 500 }
+      )
+    }
+
+    try {
       // Execute Python script with proper path handling
-      const pythonCommand = isServerEnvironment ? 'python3' : 'python'
+      const pythonCommand = 'python3'
       
       // Ensure URL is properly quoted for shell execution
       const quotedUrl = `"${url.replace(/"/g, '\\"').replace(/ /g, '\\ ')}"`
