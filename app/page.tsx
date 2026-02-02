@@ -2,7 +2,8 @@
 
 import { useState, useRef } from 'react'
 import Link from 'next/link'
-import { Search, Download, Youtube, Video, Music, Loader2, AlertCircle } from 'lucide-react'
+import { Search, Download, Youtube, Video, Music, Loader2, AlertCircle, Globe, Play } from 'lucide-react'
+import DownloadUI from '../components/DownloadUI'
 
 export default function Home() {
   const [url, setUrl] = useState('')
@@ -10,7 +11,7 @@ export default function Home() {
   const [error, setError] = useState('')
   const [videoInfo, setVideoInfo] = useState<any>(null)
   const [formats, setFormats] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'video' | 'audio'>('video')
+  const [isExploring, setIsExploring] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const validateUrl = (url: string) => {
@@ -25,17 +26,23 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setIsExploring(false)
     
-    if (!url.trim()) {
-      setError('Please enter a YouTube URL')
+    const trimmedUrl = url.trim()
+    
+    // Handle empty submission - start exploration
+    if (!trimmedUrl) {
+      setIsExploring(true)
       return
     }
 
-    if (!validateUrl(url)) {
-      setError('Please enter a valid YouTube URL')
+    // Handle non-YouTube links - start exploration with search query
+    if (!validateUrl(trimmedUrl)) {
+      setIsExploring(true)
       return
     }
 
+    // Handle valid YouTube URL - proceed with downloading
     setLoading(true)
     
     try {
@@ -44,7 +51,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: trimmedUrl }),
       })
 
       if (!response.ok) {
@@ -58,38 +65,6 @@ export default function Home() {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleDownload = async (format: any) => {
-    try {
-      const response = await fetch('/api/download', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url,
-          format: format.itag,
-          type: format.hasVideo ? 'video' : 'audio',
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to start download')
-      }
-
-      const data = await response.json()
-      
-      // Create a temporary link to trigger download
-      const link = document.createElement('a')
-      link.href = data.downloadUrl
-      link.download = data.filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed')
     }
   }
 
@@ -230,7 +205,7 @@ export default function Home() {
                     {videoInfo.views} views
                   </span>
                   <span className="bg-purple-100 text-purple-800 text-sm px-3 py-1 rounded-full">
-                    {videoInfo.uploadDate}
+                    {videoInfo.author}
                   </span>
                 </div>
               </div>
@@ -238,78 +213,175 @@ export default function Home() {
           </div>
         )}
 
-        {/* Format Selection */}
-        {formats.length > 0 && (
-          <div className="max-w-4xl mx-auto">
-            <div className="bg-white rounded-2xl shadow-xl p-8">
-              <div className="flex border-b border-gray-200 mb-6">
-                <button
-                  onClick={() => setActiveTab('video')}
-                  className={`px-6 py-3 font-semibold transition-colors ${
-                    activeTab === 'video'
-                      ? 'text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Video className="inline-block h-5 w-5 mr-2" />
-                  Video Formats
-                </button>
-                <button
-                  onClick={() => setActiveTab('audio')}
-                  className={`px-6 py-3 font-semibold transition-colors ${
-                    activeTab === 'audio'
-                      ? 'text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Music className="inline-block h-5 w-5 mr-2" />
-                  Audio Formats
-                </button>
-              </div>
+        {/* Download UI Component */}
+        {videoInfo && formats.length > 0 && (
+          <DownloadUI
+            videoInfo={videoInfo}
+            formats={formats}
+            onDownloadComplete={() => {
+              // Optional callback when download completes
+              console.log('Download completed successfully')
+            }}
+          />
+        )}
 
-              <div className="grid gap-4">
-                {formats
-                  .filter(format => activeTab === 'video' ? format.hasVideo : !format.hasVideo)
-                  .sort((a, b) => {
-                    if (activeTab === 'video') {
-                      return (b.height || 0) - (a.height || 0)
-                    } else {
-                      return (b.bitrate || 0) - (a.bitrate || 0)
-                    }
-                  })
-                  .map((format) => (
-                    <div key={format.itag} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                      <div className="flex justify-between items-center">
-                        <div className="flex-1">
-                          <div className="flex items-center space-x-2 mb-2">
-                            {format.hasVideo && (
-                              <span className="quality-badge">
-                                {format.qualityLabel || format.quality}
-                              </span>
-                            )}
-                            <span className="format-badge">
-                              {format.container || format.mimeType?.split('/')[1]}
-                            </span>
-                            {format.hasAudio && (
-                              <span className="bg-yellow-100 text-yellow-800 text-sm px-2 py-1 rounded">
-                                Audio
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-gray-600">
-                            {format.hasVideo ? `${format.width}x${format.height}` : `${format.bitrate} kbps`}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleDownload(format)}
-                          className="download-btn bg-green-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center space-x-2"
-                        >
-                          <Download className="h-4 w-4" />
-                          <span>Download</span>
-                        </button>
-                      </div>
+        {/* Exploration Section */}
+        {isExploring && (
+          <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl p-8 mb-8">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 rounded-full flex items-center justify-center">
+                <Globe className="w-8 h-8 text-blue-600" />
+              </div>
+              <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                {url.trim() ? 'Search Results' : 'Explore YouTube Content'}
+              </h3>
+              <p className="text-gray-600 mb-4">
+                {url.trim() 
+                  ? `Searching for: "${url.trim()}"`
+                  : 'Discover trending videos and popular content to download'
+                }
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div className="bg-gray-50 rounded-lg p-6">
+                <h4 className="font-semibold text-gray-900 mb-3">Continue Searching</h4>
+                <p className="text-sm text-gray-600 mb-4">
+                  Use the search box above to find more videos or enter a YouTube URL to download
+                </p>
+                <div className="space-y-3">
+                  <div className="text-xs text-gray-500 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <strong>Tip:</strong> You can search for any topic or paste a YouTube URL in the search box above.
+                    <br />
+                    <strong>Examples:</strong> "music", "tutorials", "gaming", or "https://www.youtube.com/watch?v=..."
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 rounded-lg p-6">
+                <h4 className="font-semibold text-gray-900 mb-3">Popular Categories</h4>
+                <div className="space-y-2">
+                  <button 
+                    onClick={() => {
+                      setUrl('music')
+                      setIsExploring(true)
+                    }}
+                    className="w-full text-left p-3 rounded-lg hover:bg-white transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Popular Music</span>
+                      <Music className="h-5 w-5 text-green-600" />
                     </div>
-                  ))}
+                    <p className="text-sm text-gray-600 mt-1">Songs and music videos</p>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setUrl('tutorials')
+                      setIsExploring(true)
+                    }}
+                    className="w-full text-left p-3 rounded-lg hover:bg-white transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Educational Content</span>
+                      <Play className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">Tutorials and learning videos</p>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setUrl('gaming')
+                      setIsExploring(true)
+                    }}
+                    className="w-full text-left p-3 rounded-lg hover:bg-white transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Gaming Videos</span>
+                      <Video className="h-5 w-5 text-purple-600" />
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">Gameplay and gaming content</p>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setUrl('comedy')
+                      setIsExploring(true)
+                    }}
+                    className="w-full text-left p-3 rounded-lg hover:bg-white transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">Entertainment</span>
+                      <Play className="h-5 w-5 text-yellow-600" />
+                    </div>
+                    <p className="text-sm text-gray-600 mt-1">Comedy and entertainment videos</p>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 pt-6">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-600">
+                  {url.trim() 
+                    ? `Showing results for: "${url.trim()}"`
+                    : 'Browse trending content or use the search box above'
+                  }
+                </div>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => {
+                      setUrl('')
+                      setIsExploring(false)
+                    }}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Back to Search
+                  </button>
+                  <button
+                    onClick={() => {
+                      setUrl('')
+                      setIsExploring(true)
+                    }}
+                    className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 transition-colors"
+                  >
+                    Clear Search
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* No Formats Available Message */}
+        {videoInfo && formats.length === 0 && (
+          <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl p-8 mb-8">
+            <div className="text-center py-8">
+              <div className="w-16 h-16 mx-auto mb-4 bg-yellow-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-8 h-8 text-yellow-600" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Download Formats Available</h3>
+              <p className="text-gray-600 mb-4">
+                We found the video information but couldn't retrieve available download formats.
+              </p>
+              <p className="text-sm text-gray-500">
+                This may be due to YouTube's restrictions or temporary issues. Please try again later.
+              </p>
+              <div className="mt-6 flex justify-center space-x-4">
+                <button
+                  onClick={() => {
+                    setVideoInfo(null)
+                    setFormats([])
+                    setError('')
+                  }}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  Try Another Video
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={loading}
+                  className="bg-gray-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-gray-700 transition-colors disabled:opacity-50"
+                >
+                  Retry
+                </button>
               </div>
             </div>
           </div>

@@ -1,0 +1,125 @@
+﻿import { NextRequest, NextResponse } from 'next/server'
+import ytdl from 'ytdl-core'
+import play from 'play-dl'
+import { PassThrough } from 'stream'
+
+export const runtime = 'nodejs'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { url, format, type } = await request.json()
+
+    if (!url || !format) {
+      return NextResponse.json(
+        { error: 'URL and format are required' },
+        { status: 400 }
+      )
+    }
+
+    // Extract video id
+    const extractVideoId = (input: string): string | null => {
+      try {
+        const u = new URL(input)
+        const host = u.hostname.toLowerCase()
+        if (host.includes('youtu.be')) return u.pathname.slice(1)
+        if (host.includes('youtube.com')) {
+          const v = u.searchParams.get('v')
+          if (v) return v
+          const parts = u.pathname.split('/').filter(Boolean)
+          if (parts.length) return parts[parts.length - 1]
+        }
+      } catch {
+        // ignore
+      }
+      if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input
+      return null
+    }
+
+    const videoId = extractVideoId(url)
+    if (!videoId) return NextResponse.json({ error: 'Invalid YouTube URL or ID' }, { status: 400 })
+
+    // Get video info with additional options to handle signature extraction
+    // Prefer play-dl for streaming
+    let info: any = null
+    try {
+      const plInfo = await play.video_info(videoId)
+      if (plInfo && plInfo.video_details) {
+        info = await ytdl.getInfo(videoId).catch(() => null) // keep ytdl info for format matching if available
+        // merge play-dl sources into formats when possible
+        info = info || { videoDetails: { title: plInfo.video_details.title || 'video', videoId } , formats: [] }
+        const sources = plInfo.sources || []
+        info.formats = sources.map((s: any) => ({
+          itag: s.itag || s.quality_label || s.quality,
+          quality: s.quality,
+          qualityLabel: s.quality_label,
+          mimeType: s.mimeType || s.type,
+          container: s.container || (s.mimeType ? s.mimeType.split('/')[1] : undefined),
+          hasVideo: !!s.quality_label,
+          hasAudio: !!s.audio,
+          width: s.width,
+          height: s.height,
+          bitrate: s.bitrate,
+          audioBitrate: s.audioBitrate || s.audio?.bitrate,
+          url: s.url || s.source,
+        }))
+      }
+    } catch (e) {
+      console.warn('play-dl failed for download info, falling back to ytdl-core', e)
+      try {
+        info = await ytdl.getInfo(videoId)
+      } catch (err) {
+        console.error('Failed to obtain video info for download', err)
+        return NextResponse.json({ error: 'Failed to obtain video info' }, { status: 502 })
+      }
+    }
+    
+    // Find the requested format
+    const selectedFormat = info.formats.find(f => f.itag === parseInt(format))
+    
+    if (!selectedFormat) {
+      return NextResponse.json(
+        { error: 'Requested format not available' },
+        { status: 404 }
+      )
+    }
+
+    // Generate filename
+    const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_')
+    const extension = selectedFormat.container || selectedFormat.mimeType?.split('/')[1] || 'mp4'
+    const filename = `${title}.${extension}`
+
+    // Try streaming using play-dl when possible (better at handling signatures)
+    const pass = new PassThrough()
+    try {
+      if (play && typeof play.stream === 'function') {
+        // play.stream accepts URL or id and returns a stream
+        const plStream = await play.stream(videoId, { quality: 'highestaudio' })
+        // If the user requested a specific format url, try to find matching source
+        if (plStream && plStream.stream) {
+          plStream.stream.pipe(pass)
+        } else {
+          // fallback to ytdl if play-dl didn't return a stream
+          ytdl(url, { format: selectedFormat }).pipe(pass)
+        }
+      } else {
+        ytdl(url, { format: selectedFormat }).pipe(pass)
+      }
+    } catch (streamErr) {
+      console.warn('play-dl streaming failed, falling back to ytdl', streamErr)
+      ytdl(url, { format: selectedFormat }).pipe(pass)
+    }
+
+    const headers = new Headers()
+    headers.set('Content-Type', selectedFormat.mimeType || 'application/octet-stream')
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`)
+
+    return new NextResponse(pass as any, { headers })
+
+  } catch (error) {
+    console.error('Error downloading video:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to download video' },
+      { status: 500 }
+    )
+  }
+}

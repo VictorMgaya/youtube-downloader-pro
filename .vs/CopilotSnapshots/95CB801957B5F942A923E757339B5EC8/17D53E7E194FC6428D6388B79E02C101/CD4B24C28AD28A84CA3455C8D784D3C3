@@ -1,0 +1,92 @@
+﻿import { NextRequest, NextResponse } from 'next/server'
+import ytdl from 'ytdl-core'
+import { PassThrough } from 'stream'
+
+export const runtime = 'nodejs'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { url, format, type } = await request.json()
+
+    if (!url || !format) {
+      return NextResponse.json(
+        { error: 'URL and format are required' },
+        { status: 400 }
+      )
+    }
+
+    // Extract video id
+    const extractVideoId = (input: string): string | null => {
+      try {
+        const u = new URL(input)
+        const host = u.hostname.toLowerCase()
+        if (host.includes('youtu.be')) return u.pathname.slice(1)
+        if (host.includes('youtube.com')) {
+          const v = u.searchParams.get('v')
+          if (v) return v
+          const parts = u.pathname.split('/').filter(Boolean)
+          if (parts.length) return parts[parts.length - 1]
+        }
+      } catch {
+        // ignore
+      }
+      if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input
+      return null
+    }
+
+    const videoId = extractVideoId(url)
+    if (!videoId) return NextResponse.json({ error: 'Invalid YouTube URL or ID' }, { status: 400 })
+
+    // Get video info with additional options to handle signature extraction
+    let info
+    try {
+      info = await ytdl.getInfo(videoId, {
+        lang: 'en',
+        requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }
+      })
+    } catch (e) {
+      console.warn('Primary getInfo failed, trying fallback', e)
+      try {
+        info = await ytdl.getInfo(videoId, {
+          lang: 'en',
+          requestOptions: { headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X)' } }
+        })
+      } catch (err) {
+        console.error('Both attempts to get video info failed', err)
+        return NextResponse.json({ error: 'Failed to retrieve video information for download' }, { status: 502 })
+      }
+    }
+    
+    // Find the requested format
+    const selectedFormat = info.formats.find(f => f.itag === parseInt(format))
+    
+    if (!selectedFormat) {
+      return NextResponse.json(
+        { error: 'Requested format not available' },
+        { status: 404 }
+      )
+    }
+
+    // Generate filename
+    const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_')
+    const extension = selectedFormat.container || selectedFormat.mimeType?.split('/')[1] || 'mp4'
+    const filename = `${title}.${extension}`
+
+    // Stream the selected format through a PassThrough so Next can send it
+    const pass = new PassThrough()
+    ytdl(url, { format: selectedFormat }).pipe(pass)
+
+    const headers = new Headers()
+    headers.set('Content-Type', selectedFormat.mimeType || 'application/octet-stream')
+    headers.set('Content-Disposition', `attachment; filename="${filename}"`)
+
+    return new NextResponse(pass as any, { headers })
+
+  } catch (error) {
+    console.error('Error downloading video:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to download video' },
+      { status: 500 }
+    )
+  }
+}

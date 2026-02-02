@@ -1,0 +1,120 @@
+﻿import { NextRequest, NextResponse } from 'next/server'
+import ytdl from 'ytdl-core'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { url } = await request.json()
+
+    if (!url) {
+      return NextResponse.json(
+        { error: 'URL is required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate URL
+    let videoId: string
+    try {
+      const urlObj = new URL(url)
+      if (urlObj.hostname.includes('youtube.com')) {
+        videoId = urlObj.searchParams.get('v') || ''
+      } else if (urlObj.hostname.includes('youtu.be')) {
+        videoId = urlObj.pathname.slice(1)
+      } else {
+        throw new Error('Invalid YouTube URL')
+      }
+
+      if (!videoId) {
+        throw new Error('Could not extract video ID')
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'Invalid URL format' },
+        { status: 400 }
+      )
+    }
+
+    // Try getting video info with additional options to handle signature extraction
+    let info;
+    try {
+      info = await ytdl.getInfo(videoId, {
+        lang: 'en',
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        }
+      })
+    } catch (signatureError) {
+      console.error('Signature extraction failed, attempting fallback:', signatureError);
+      // If standard method fails, try with additional bypass options
+      try {
+        info = await ytdl.getInfo(videoId, {
+          lang: 'en',
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1'
+            }
+          }
+        })
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+        throw new Error('Failed to extract YouTube video information due to signature deciphering issues. This is likely due to YouTube updating their signature algorithm.');
+      }
+    }
+    
+    // Extract video information
+    const videoInfo = {
+      title: info.videoDetails.title,
+      description: info.videoDetails.description,
+      thumbnail: info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1]?.url,
+      duration: info.videoDetails.lengthSeconds,
+      views: info.videoDetails.viewCount,
+      uploadDate: info.videoDetails.uploadDate,
+      author: info.videoDetails.author.name,
+      videoId: info.videoDetails.videoId,
+    }
+
+    // Filter and format available formats
+    const formats = info.formats
+      .filter(format => format.hasVideo || format.hasAudio)
+      .map(format => ({
+        itag: format.itag,
+        quality: format.quality,
+        qualityLabel: format.qualityLabel,
+        mimeType: format.mimeType,
+        container: format.container,
+        hasVideo: format.hasVideo,
+        hasAudio: format.hasAudio,
+        width: format.width,
+        height: format.height,
+        bitrate: format.bitrate,
+        audioBitrate: format.audioBitrate,
+        url: format.url,
+      }))
+      .sort((a, b) => {
+        // Sort by quality for video formats
+        if (a.hasVideo && b.hasVideo) {
+          return (b.height || 0) - (a.height || 0)
+        }
+        // Sort by bitrate for audio formats
+        if (!a.hasVideo && !b.hasVideo) {
+          return (b.audioBitrate || 0) - (a.audioBitrate || 0)
+        }
+        // Video formats first
+        return a.hasVideo ? -1 : 1
+      })
+
+    return NextResponse.json({
+      videoInfo,
+      formats
+    })
+
+  } catch (error) {
+    console.error('Error fetching video info:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch video information' },
+      { status: 500 }
+    )
+  }
+}

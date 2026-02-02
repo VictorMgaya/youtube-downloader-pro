@@ -1,0 +1,135 @@
+﻿import { NextRequest, NextResponse } from 'next/server'
+import ytdl from 'ytdl-core'
+
+// Ensure this route runs in the Node.js runtime so native modules like ytdl-core work reliably
+export const runtime = 'nodejs'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { url } = await request.json()
+
+    if (!url) {
+      return NextResponse.json(
+        { error: 'URL is required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate URL and extract video ID
+    const extractVideoId = (input: string): string | null => {
+      try {
+        const u = new URL(input)
+        const host = u.hostname.toLowerCase()
+        if (host.includes('youtu.be')) {
+          return u.pathname.slice(1)
+        }
+        if (host.includes('youtube.com')) {
+          // watch?v=...
+          const v = u.searchParams.get('v')
+          if (v) return v
+          // /shorts/VIDEO_ID or /embed/VIDEO_ID or other path-based IDs
+          const parts = u.pathname.split('/').filter(Boolean)
+          if (parts.length) {
+            return parts[parts.length - 1]
+          }
+        }
+      } catch (e) {
+        // not a URL, may already be a video id
+      }
+
+      // If the input itself looks like a video ID, return it
+      if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input
+      return null
+    }
+
+    const videoId = extractVideoId(url)
+    if (!videoId) {
+      return NextResponse.json({ error: 'Invalid YouTube URL or video ID' }, { status: 400 })
+    }
+
+    // Try getting video info with additional options to handle signature extraction
+    let info
+    try {
+      info = await ytdl.getInfo(videoId, {
+        lang: 'en',
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        }
+      })
+    } catch (signatureError) {
+      console.warn('Primary getInfo failed, attempting fallback with alternate User-Agent', signatureError)
+      try {
+        info = await ytdl.getInfo(videoId, {
+          lang: 'en',
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1'
+            }
+          }
+        })
+      } catch (fallbackError) {
+        console.error('Both getInfo attempts failed:', fallbackError)
+        return NextResponse.json(
+          { error: 'Failed to fetch video information. YouTube may have changed its signing algorithm or the video is restricted.' },
+          { status: 502 }
+        )
+      }
+    }
+    
+    // Extract video information
+    const videoInfo = {
+      title: info.videoDetails.title,
+      description: info.videoDetails.description,
+      thumbnail: info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1]?.url,
+      duration: info.videoDetails.lengthSeconds,
+      views: info.videoDetails.viewCount,
+      uploadDate: info.videoDetails.uploadDate,
+      author: info.videoDetails.author.name,
+      videoId: info.videoDetails.videoId,
+    }
+
+    // Filter and format available formats
+    const formats = info.formats
+      .filter(format => format.hasVideo || format.hasAudio)
+      .map(format => ({
+        itag: format.itag,
+        quality: format.quality,
+        qualityLabel: format.qualityLabel,
+        mimeType: format.mimeType,
+        container: format.container,
+        hasVideo: format.hasVideo,
+        hasAudio: format.hasAudio,
+        width: format.width,
+        height: format.height,
+        bitrate: format.bitrate,
+        audioBitrate: format.audioBitrate,
+        url: format.url,
+      }))
+      .sort((a, b) => {
+        // Sort by quality for video formats
+        if (a.hasVideo && b.hasVideo) {
+          return (b.height || 0) - (a.height || 0)
+        }
+        // Sort by bitrate for audio formats
+        if (!a.hasVideo && !b.hasVideo) {
+          return (b.audioBitrate || 0) - (a.audioBitrate || 0)
+        }
+        // Video formats first
+        return a.hasVideo ? -1 : 1
+      })
+
+    return NextResponse.json({
+      videoInfo,
+      formats
+    })
+
+  } catch (error) {
+    console.error('Error fetching video info:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to fetch video information' },
+      { status: 500 }
+    )
+  }
+}

@@ -1,0 +1,100 @@
+﻿import { NextRequest, NextResponse } from 'next/server'
+import ytdl from 'ytdl-core'
+import { Readable } from 'stream'
+
+export async function POST(request: NextRequest) {
+  try {
+    const { url, format, type } = await request.json()
+
+    if (!url || !format) {
+      return NextResponse.json(
+        { error: 'URL and format are required' },
+        { status: 400 }
+      )
+    }
+
+    // Validate URL
+    let videoId: string
+    try {
+      const urlObj = new URL(url)
+      if (urlObj.hostname.includes('youtube.com')) {
+        videoId = urlObj.searchParams.get('v') || ''
+      } else if (urlObj.hostname.includes('youtu.be')) {
+        videoId = urlObj.pathname.slice(1)
+      } else {
+        throw new Error('Invalid YouTube URL')
+      }
+
+      if (!videoId) {
+        throw new Error('Could not extract video ID')
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'Invalid URL format' },
+        { status: 400 }
+      )
+    }
+
+    // Get video info with additional options to handle signature extraction
+    let info;
+    try {
+      info = await ytdl.getInfo(videoId, {
+        lang: 'en',
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        }
+      })
+    } catch (signatureError) {
+      console.error('Signature extraction failed in download, attempting fallback:', signatureError);
+      // If standard method fails, try with additional bypass options
+      info = await ytdl.getInfo(videoId, {
+        lang: 'en',
+        requestOptions: {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1'
+          }
+        }
+      })
+    }
+    
+    // Find the requested format
+    const selectedFormat = info.formats.find(f => f.itag === parseInt(format))
+    
+    if (!selectedFormat) {
+      return NextResponse.json(
+        { error: 'Requested format not available' },
+        { status: 404 }
+      )
+    }
+
+    // Generate filename
+    const title = info.videoDetails.title.replace(/[^a-zA-Z0-9]/g, '_')
+    const extension = selectedFormat.container || selectedFormat.mimeType?.split('/')[1] || 'mp4'
+    const filename = `${title}.${extension}`
+
+    // Create a readable stream from the format URL
+    const stream = ytdl(url, {
+      format: selectedFormat,
+    })
+
+    // Set up response headers for download
+    const response = new NextResponse(stream as any, {
+      headers: {
+        'Content-Type': selectedFormat.mimeType || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': selectedFormat.contentLength || '',
+      },
+    })
+
+    return response
+
+  } catch (error) {
+    console.error('Error downloading video:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to download video' },
+      { status: 500 }
+    )
+  }
+}
